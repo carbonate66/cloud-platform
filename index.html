@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工业智能一体化云平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    
+    <!-- 引入 Three.js 及相关组件用于 3D 模型加载 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    
+    <!-- 自定义Tailwind配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#00d4ff',
+                        secondary: '#0099cc',
+                        dark: '#0a0e17',
+                        darker: '#05070b',
+                        card: 'rgba(15, 23, 42, 0.7)',
+                    },
+                    fontFamily: {
+                        tech: ['Consolas', 'Monaco', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glow-border {
+                box-shadow: 0 0 10px rgba(0, 212, 255, 0.3), inset 0 0 10px rgba(0, 212, 255, 0.1);
+                border: 1px solid rgba(0, 212, 255, 0.4);
+            }
+            .glow-text {
+                text-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
+            }
+            .glass {
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            }
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+            .scrollbar-hide {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+            }
+            /* 页面切换动画 */
+            .page-enter {
+                animation: fadeIn 0.3s ease-in-out forwards;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            /* DeepSeek 思考框样式 */
+            details > summary {
+                list-style: none;
+            }
+            details > summary::-webkit-details-marker {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body class="bg-dark text-gray-200 font-tech overflow-hidden h-screen flex flex-col">
+
+    <!-- 身份验证拦截层 (Login Modal) -->
+    <div id="login-overlay" class="fixed inset-0 z-50 bg-darker/90 glass flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="bg-card glow-border rounded-xl p-8 w-full max-w-md flex flex-col items-center shadow-2xl shadow-primary/20">
+            <i class="fa fa-shield text-5xl text-primary glow-text mb-4"></i>
+            <h2 class="text-2xl font-bold text-white mb-2">云平台身份验证</h2>
+            <p class="text-gray-400 text-sm mb-6">系统已锁定，请验证您的访问权限</p>
+            
+            <div class="w-full space-y-4">
+                <div>
+                    <label class="block text-primary text-sm mb-1">选择身份</label>
+                    <select id="role-select" class="w-full bg-darker border border-primary/30 rounded p-2 text-white outline-none focus:border-primary transition-colors">
+                        <option value="guest">访客 (仅总览/AI)</option>
+                        <option value="operator">操作员 (除数据分析外)</option>
+                        <option value="admin">管理员 (所有权限)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-primary text-sm mb-1">访问密码</label>
+                    <input type="password" id="password-input" class="w-full bg-darker border border-primary/30 rounded p-2 text-white outline-none focus:border-primary transition-colors" placeholder="请输入对应密码">
+                </div>
+                <div id="login-error" class="text-red-500 text-xs hidden">密码错误，请重试</div>
+                <button id="login-btn" class="w-full bg-primary hover:bg-secondary text-white font-bold py-2 rounded transition-colors mt-4">
+                    验证并进入系统
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-card glass glow-border px-6 py-3 flex items-center justify-between z-10 shrink-0 relative">
+        <div class="flex items-center space-x-2">
+            <i class="fa fa-cogs text-primary text-2xl glow-text"></i>
+            <h1 class="text-xl font-bold text-primary glow-text hidden sm:block">工业智能一体化云平台</h1>
+        </div>
+        
+        <!-- 导航菜单（修复了移动端展示与遮挡问题） -->
+        <nav class="hidden absolute top-full left-0 w-full bg-dark/95 glass border-b border-primary/30 lg:border-none lg:bg-transparent lg:static lg:w-auto lg:flex flex-col lg:flex-row space-y-4 lg:space-y-0 p-4 lg:p-0 z-50 lg:space-x-6" id="main-nav">
+            <a href="#" data-target="page-overview" class="nav-link text-primary hover:text-white transition-colors block lg:inline-block">首页总览</a>
+            <a href="#" data-target="page-plc" class="nav-link hover:text-primary transition-colors block lg:inline-block">PLC监控</a>
+            <a href="#" data-target="page-robot" class="nav-link hover:text-primary transition-colors block lg:inline-block">机器人数据</a>
+            <a href="#" data-target="page-3d" class="nav-link hover:text-primary transition-colors block lg:inline-block">3D数字孪生</a>
+            <a href="#" data-target="page-ai" class="nav-link hover:text-primary transition-colors block lg:inline-block">AI智能交互</a>
+            <a href="#" data-target="page-data" class="nav-link hover:text-primary transition-colors block lg:inline-block">数据分析</a>
+        </nav>
+        
+        <div class="flex items-center space-x-4">
+            <span id="current-time" class="text-sm hidden md:block"></span>
+            <div class="flex items-center space-x-2">
+                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                <span class="text-green-400 text-sm">云端已接入</span>
+            </div>
+            <!-- 移动端菜单按钮 -->
+            <button id="mobile-menu-btn" class="lg:hidden text-primary text-xl ml-2 px-2 focus:outline-none">
+                <i class="fa fa-bars"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 overflow-hidden p-2 lg:p-4 relative">
+        
+        <!-- ==================== 页面 1: 首页总览 ==================== -->
+        <div id="page-overview" class="page-view h-full flex flex-col lg:flex-row gap-4 overflow-y-auto lg:overflow-hidden page-enter">
+            
+            <!-- 左侧：AI智能交互区 & 用户模块 -->
+            <div class="w-full lg:w-1/4 flex flex-col h-[500px] lg:h-full gap-4 shrink-0">
+                <div class="flex-1 flex flex-col bg-card glass glow-border rounded-lg overflow-hidden">
+                    <div class="p-3 border-b border-primary/30 flex items-center space-x-2 shrink-0">
+                        <i class="fa fa-robot text-primary"></i>
+                        <h2 class="font-bold">云端AI智能决策系统</h2>
+                    </div>
+                    
+                    <!-- 聊天窗口 -->
+                    <div id="overview-chat-messages" class="flex-1 p-4 overflow-y-auto scrollbar-hide space-y-4">
+                        <div class="flex items-start space-x-2">
+                            <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                <i class="fa fa-robot text-primary"></i>
+                            </div>
+                            <div class="bg-primary/10 rounded-lg p-3 max-w-[85%]">
+                                <p>您好！我是工业智能助手。</p>
+                                <p class="text-xs text-gray-400 mt-1">我可以为您提供设备咨询、故障分析等服务。如需体验深度思考模型，请前往“AI智能交互”专页。</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 输入框 -->
+                    <div class="p-3 border-t border-primary/30 shrink-0">
+                        <div class="flex space-x-2">
+                            <input type="text" id="overview-user-input" placeholder="简易查询..." class="flex-1 bg-darker border border-primary/30 rounded-lg px-4 py-2 focus:outline-none focus:border-primary text-sm disabled:opacity-50">
+                            <button id="overview-send-btn" class="bg-primary hover:bg-secondary text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fa fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 底部用户界面信息卡片 -->
+                <div class="bg-card glass glow-border rounded-lg p-3 flex items-center space-x-3 shrink-0">
+                    <div class="w-12 h-12 rounded-full bg-darker border border-primary/50 flex items-center justify-center shadow-[0_0_8px_rgba(0,212,255,0.4)]">
+                        <i class="fa fa-user-o text-2xl text-primary"></i>
+                    </div>
+                    <div class="flex-1">
+                        <div class="text-sm font-bold text-white flex items-center justify-between">
+                            <span id="ui-username" class="truncate max-w-[100px]">未登录</span>
+                            <span class="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded border border-primary/30 whitespace-nowrap" id="ui-role">--</span>
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                            <i class="fa fa-circle text-green-500 text-[8px] animate-pulse"></i> 身份验证已通过
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 中间主区域 -->
+            <div class="w-full lg:w-1/2 flex-1 flex flex-col gap-4 shrink-0 min-h-[600px] lg:min-h-0">
+                <!-- 上半部分：3D模型展示区 -->
+                <div class="flex-1 bg-card glass glow-border rounded-lg overflow-hidden flex flex-col relative">
+                    <div class="p-3 border-b border-primary/30 flex items-center justify-between shrink-0 absolute top-0 w-full z-20 bg-darker/60 glass">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa fa-cube text-primary"></i>
+                            <h2 class="font-bold text-sm md:text-base">水轮机叶片3D数字孪生</h2>
+                        </div>
+                        <div class="flex items-center space-x-2 md:space-x-4 text-xs md:text-sm">
+                            <span class="hidden sm:inline">模型状态: <span class="text-green-400">已加载</span></span>
+                            <span>轨迹: <span class="text-primary">鼠标拖动旋转</span></span>
+                        </div>
+                    </div>
+                    <!-- 3D模型容器 -->
+                    <div id="model-container" class="flex-1 bg-darker/50 flex items-center justify-center relative min-h-[300px] w-full pt-12 cursor-move">
+                        <div id="model-placeholder" class="text-center text-gray-500 z-10 pointer-events-none">
+                            <i class="fa fa-cube text-4xl md:text-6xl mb-2 md:mb-4 opacity-30 animate-pulse"></i>
+                            <p class="text-sm md:text-base text-primary">正在初始化 3D 渲染引擎...</p>
+                            <p class="text-xs mt-1">加载 blade.stl</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 下半部分：实时数据卡片 (修复平板字体溢出) -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 shrink-0">
+                    <div class="bg-card glass glow-border rounded-lg p-3 md:p-4 flex flex-col justify-between overflow-hidden">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs md:text-sm text-gray-400 whitespace-nowrap">PLC运行频率</h3>
+                            <i class="fa fa-microchip text-primary shrink-0"></i>
+                        </div>
+                        <div class="text-xl md:text-2xl lg:text-3xl font-bold text-primary glow-text mt-2 truncate"><span id="plc-frequency">50.00</span></div>
+                        <div class="text-[10px] md:text-xs text-gray-400">Hz</div>
+                    </div>
+                    
+                    <div class="bg-card glass glow-border rounded-lg p-3 md:p-4 flex flex-col justify-between overflow-hidden">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs md:text-sm text-gray-400 whitespace-nowrap">输出电压</h3>
+                            <i class="fa fa-bolt text-primary shrink-0"></i>
+                        </div>
+                        <div class="text-xl md:text-2xl lg:text-3xl font-bold text-primary glow-text mt-2 truncate"><span id="plc-voltage">220.50</span></div>
+                        <div class="text-[10px] md:text-xs text-gray-400">V</div>
+                    </div>
+                    
+                    <div class="bg-card glass glow-border rounded-lg p-3 md:p-4 flex flex-col justify-between relative overflow-hidden">
+                        <div class="absolute -right-4 -bottom-4 opacity-10"><i class="fa fa-volume-up text-6xl text-secondary"></i></div>
+                        <div class="flex items-center justify-between relative z-10">
+                            <h3 class="text-xs md:text-sm text-gray-400 whitespace-nowrap">当前噪声</h3>
+                            <i class="fa fa-volume-up text-primary shrink-0"></i>
+                        </div>
+                        <div class="text-xl md:text-2xl lg:text-3xl font-bold text-primary glow-text mt-2 relative z-10 truncate"><span id="current-noise">70.15</span></div>
+                        <div class="text-[10px] md:text-xs text-gray-400 relative z-10">dB</div>
+                    </div>
+                    
+                    <div class="bg-card glass glow-border rounded-lg p-3 md:p-4 flex flex-col justify-between overflow-hidden">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs md:text-sm text-gray-400 whitespace-nowrap">设备状态</h3>
+                            <i class="fa fa-check-circle text-green-500 shrink-0"></i>
+                        </div>
+                        <div class="text-xl md:text-2xl lg:text-3xl font-bold text-green-500 mt-2 truncate">正常</div>
+                        <div class="text-[10px] md:text-xs text-gray-400">运行中</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：数据可视化区 -->
+            <div class="w-full lg:w-1/4 flex flex-col h-[600px] lg:h-full gap-4 shrink-0">
+                <div class="flex-1 bg-card glass glow-border rounded-lg overflow-hidden flex flex-col min-h-[250px]">
+                    <div class="p-3 border-b border-primary/30 shrink-0">
+                        <h2 class="font-bold flex items-center space-x-2 text-sm md:text-base">
+                            <i class="fa fa-line-chart text-primary"></i>
+                            <span>PLC运行数据曲线</span>
+                        </h2>
+                    </div>
+                    <div id="chart-plc" class="flex-1 p-2 w-full"></div>
+                </div>
+                
+                <div class="flex-1 bg-card glass glow-border rounded-lg overflow-hidden flex flex-col min-h-[250px]">
+                    <div class="p-3 border-b border-primary/30 shrink-0">
+                        <h2 class="font-bold flex items-center space-x-2 text-sm md:text-base">
+                            <i class="fa fa-bar-chart text-primary"></i>
+                            <span>工况数据对比</span>
+                        </h2>
+                    </div>
+                    <div id="chart-compare" class="flex-1 p-2 w-full"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== 页面 2: 独立 AI 智能交互页面 (DeepSeek风格) ==================== -->
+        <div id="page-ai" class="page-view hidden h-full w-full flex flex-col bg-card glass glow-border rounded-lg overflow-hidden">
+            <div class="p-4 border-b border-primary/30 flex items-center justify-between bg-darker/50 shrink-0">
+                <div class="flex items-center space-x-3">
+                    <i class="fa fa-brain text-primary text-2xl"></i>
+                    <div>
+                        <h2 class="font-bold text-lg text-white truncate">Cloud AI 深度推理模型</h2>
+                        <p class="text-xs text-gray-400">具备逻辑分析、故障推演的深层思考能力</p>
+                    </div>
+                </div>
+                <div class="text-xs bg-primary/20 text-primary px-3 py-1 rounded-full border border-primary/30 hidden sm:block">Model: Industrial-R1</div>
+            </div>
+            
+            <div id="deep-chat-messages" class="flex-1 p-4 md:p-8 overflow-y-auto scrollbar-hide space-y-6 max-w-4xl mx-auto w-full">
+                <div class="flex items-start space-x-3">
+                    <div class="w-10 h-10 rounded-full bg-darker border border-primary/30 flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(0,212,255,0.2)]">
+                        <i class="fa fa-brain text-primary"></i>
+                    </div>
+                    <div class="mt-2 text-gray-200">
+                        <p>您好，我是云平台搭载的深度智能大模型。我将展示完整的思考链路来解答您的工业技术问题。</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-4 md:p-6 border-t border-primary/30 shrink-0 bg-darker/30">
+                <div class="max-w-4xl mx-auto flex space-x-3 relative">
+                    <textarea id="deep-user-input" rows="1" placeholder="请描述工业场景或提出问题 (Enter发送)..." class="flex-1 bg-darker border border-primary/50 rounded-xl pl-4 pr-12 py-3 focus:outline-none focus:border-primary focus:shadow-[0_0_10px_rgba(0,212,255,0.3)] text-gray-200 resize-none transition-all disabled:opacity-50"></textarea>
+                    <button id="deep-send-btn" class="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center bg-primary hover:bg-secondary text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fa fa-arrow-up"></i>
+                    </button>
+                </div>
+                <p class="text-center text-[10px] text-gray-500 mt-2">AI 生成的内容可能不完美，关键决策前请结合专家意见。</p>
+            </div>
+        </div>
+
+        <!-- ==================== 页面: 数据分析 (含PDF下载) ==================== -->
+        <div id="page-data" class="page-view hidden h-full w-full bg-card glass glow-border rounded-lg flex flex-col items-center justify-center relative">
+            <div class="text-center text-primary/50 mb-8">
+                <i class="fa fa-pie-chart text-6xl mb-4"></i>
+                <h2 class="text-2xl font-bold">大数据云端深度分析</h2>
+                <p class="mt-2 text-gray-400">挖掘生产效能瓶颈，生成阶段性效能报告</p>
+            </div>
+            
+            <!-- 新增的PDF下载按钮 -->
+            <a href="jc.pdf" download class="bg-darker/80 border-2 border-primary hover:bg-primary/20 text-white px-8 py-4 rounded-xl flex items-center gap-3 transition-all duration-300 shadow-[0_0_15px_rgba(0,212,255,0.3)] hover:shadow-[0_0_25px_rgba(0,212,255,0.6)] transform hover:-translate-y-1 group">
+                <i class="fa fa-file-pdf-o text-2xl text-red-400 group-hover:text-red-300"></i>
+                <div class="text-left">
+                    <div class="font-bold text-lg">下载综合效能分析报告</div>
+                    <div class="text-xs text-primary">jc.pdf • 点击直接下载至本地</div>
+                </div>
+                <i class="fa fa-download ml-4 text-primary opacity-50 group-hover:opacity-100 group-hover:animate-bounce"></i>
+            </a>
+        </div>
+
+        <!-- ==================== 页面 3-4: 其他占位页面 ==================== -->
+        <div id="page-plc" class="page-view hidden h-full w-full bg-card glass glow-border rounded-lg flex items-center justify-center">
+            <div class="text-center text-primary/50">
+                <i class="fa fa-microchip text-6xl mb-4"></i>
+                <h2 class="text-2xl font-bold">PLC监控高级面板</h2>
+                <p class="mt-2">权限允许，正在接入设备链路...</p>
+            </div>
+        </div>
+        <div id="page-robot" class="page-view hidden h-full w-full bg-card glass glow-border rounded-lg flex items-center justify-center">
+            <div class="text-center text-primary/50">
+                <i class="fa fa-cogs text-6xl mb-4"></i>
+                <h2 class="text-2xl font-bold">机器人关节数据详情</h2>
+                <p class="mt-2">实时抓取各轴运行轨迹...</p>
+            </div>
+        </div>
+        <div id="page-3d" class="page-view hidden h-full w-full bg-card glass glow-border rounded-lg flex items-center justify-center">
+            <div class="text-center text-primary/50">
+                <i class="fa fa-cube text-6xl mb-4"></i>
+                <h2 class="text-2xl font-bold">全景3D数字孪生车间</h2>
+                <p class="mt-2">正在前往独立渲染引擎界面...</p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 底部状态栏 -->
+    <footer class="bg-card glass glow-border px-4 md:px-6 py-2 flex items-center justify-between text-xs md:text-sm shrink-0">
+        <div class="flex items-center space-x-3 md:space-x-6">
+            <span class="hidden sm:inline">PLC在线: <span class="text-green-400">1/1</span></span>
+            <span class="hidden sm:inline">机器人在线: <span class="text-green-400">1/1</span></span>
+            <span>云端算力: <span class="text-primary font-bold">Active</span></span>
+        </div>
+        <div class="text-gray-500">
+            © 2026 工业智能一体化云平台
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // ==================== 1. 登录权限与移动端路由系统 ====================
+            const loginOverlay = document.getElementById('login-overlay');
+            const roleSelect = document.getElementById('role-select');
+            const passwordInput = document.getElementById('password-input');
+            const loginBtn = document.getElementById('login-btn');
+            const loginError = document.getElementById('login-error');
+            const navLinks = document.querySelectorAll('.nav-link');
+            const pageViews = document.querySelectorAll('.page-view');
+            const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+            const mainNav = document.getElementById('main-nav');
+            
+            const uiUsername = document.getElementById('ui-username');
+            const uiRole = document.getElementById('ui-role');
+
+            const accessRules = {
+                'guest': { pwd: '1111', title: '访客', pages: ['page-overview', 'page-ai'] },
+                'operator': { pwd: '2222', title: '操作员', pages: ['page-overview', 'page-plc', 'page-robot', 'page-3d', 'page-ai'] },
+                'admin': { pwd: '3333', title: '管理员', pages: ['page-overview', 'page-plc', 'page-robot', 'page-3d', 'page-ai', 'page-data'] }
+            };
+
+            let currentRole = null;
+
+            // 移动端菜单切换
+            mobileMenuBtn.addEventListener('click', () => {
+                mainNav.classList.toggle('hidden');
+                mainNav.classList.toggle('flex');
+            });
+
+            function switchPage(targetPageId) {
+                pageViews.forEach(page => {
+                    if (page.id === targetPageId) {
+                        page.classList.remove('hidden');
+                        page.classList.add('page-enter');
+                    } else {
+                        page.classList.add('hidden');
+                        page.classList.remove('page-enter');
+                    }
+                });
+                
+                navLinks.forEach(link => {
+                    if (link.dataset.target === targetPageId) {
+                        link.classList.remove('text-primary');
+                        link.classList.add('text-white', 'font-bold', 'border-b-2', 'border-primary');
+                    } else {
+                        link.classList.add('text-primary');
+                        link.classList.remove('text-white', 'font-bold', 'border-b-2', 'border-primary');
+                    }
+                });
+
+                // 点击后隐藏移动端菜单
+                if (window.innerWidth < 1024) {
+                    mainNav.classList.add('hidden');
+                    mainNav.classList.remove('flex');
+                }
+
+                setTimeout(() => {
+                    if(plcChart) plcChart.resize();
+                    if(compareChart) compareChart.resize();
+                    // 页面切换时重新计算3D画布大小
+                    if(camera && renderer) {
+                        const container = document.getElementById('model-container');
+                        camera.aspect = container.clientWidth / container.clientHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(container.clientWidth, container.clientHeight);
+                    }
+                }, 100);
+            }
+
+            loginBtn.addEventListener('click', () => {
+                const role = roleSelect.value;
+                const pwd = passwordInput.value;
+                if (accessRules[role].pwd === pwd) {
+                    currentRole = role;
+                    loginOverlay.classList.add('opacity-0', 'pointer-events-none');
+                    setTimeout(() => loginOverlay.remove(), 500);
+
+                    navLinks.forEach(link => {
+                        if (accessRules[role].pages.includes(link.dataset.target)) {
+                            link.style.display = window.innerWidth >= 1024 ? 'inline-block' : 'block';
+                        } else {
+                            link.style.display = 'none';
+                        }
+                    });
+
+                    uiUsername.textContent = role === 'admin' ? '系统管理员' : (role === 'operator' ? '车间操作员' : '外来访客');
+                    uiRole.textContent = accessRules[role].title;
+
+                    switchPage('page-overview');
+                    
+                    // 登录成功后初始化 3D 模型
+                    setTimeout(init3DModel, 500);
+                } else {
+                    loginError.classList.remove('hidden');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (link.style.display !== 'none') {
+                        switchPage(link.dataset.target);
+                    }
+                });
+            });
+
+
+            // ==================== 2. 全局通用功能 ====================
+            const timeEl = document.getElementById('current-time');
+            function updateTime() {
+                const now = new Date();
+                timeEl.textContent = now.toLocaleString('zh-CN', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+            }
+            setInterval(updateTime, 1000);
+            updateTime();
+
+            function animateNumber(elementId, target, decimals = 2) {
+                const element = document.getElementById(elementId);
+                if (!element) return;
+                const start = parseFloat(element.textContent);
+                const diff = target - start;
+                const duration = 800;
+                let startTime = null;
+                function step(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const progress = Math.min((timestamp - startTime) / duration, 1);
+                    const easeProgress = 1 - Math.pow(1 - progress, 3);
+                    element.textContent = (start + diff * easeProgress).toFixed(decimals);
+                    if (progress < 1) window.requestAnimationFrame(step);
+                }
+                window.requestAnimationFrame(step);
+            }
+
+            setInterval(() => {
+                animateNumber('plc-frequency', 49.5 + Math.random() * 1);
+                animateNumber('plc-voltage', 219 + Math.random() * 3);
+                animateNumber('current-noise', 70 + (Math.random() * 4 - 2)); 
+            }, 3000);
+
+
+            // ==================== 3. 简易 AI 聊天 (总览页面) - 打字机效果 ====================
+            const overviewChat = document.getElementById('overview-chat-messages');
+            const overviewInput = document.getElementById('overview-user-input');
+            const overviewBtn = document.getElementById('overview-send-btn');
+            
+            function overviewSendMessage() {
+                const msg = overviewInput.value.trim();
+                if (!msg) return;
+                overviewInput.value = '';
+                overviewInput.disabled = true;
+                overviewBtn.disabled = true;
+
+                overviewChat.insertAdjacentHTML('beforeend', `
+                    <div class="flex items-start justify-end space-x-2">
+                        <div class="bg-blue-600/20 rounded-lg p-3 max-w-[85%] text-sm"><p>${msg}</p></div>
+                        <div class="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center shrink-0">
+                            <i class="fa fa-user text-blue-400 text-xs"></i>
+                        </div>
+                    </div>`);
+                overviewChat.scrollTop = overviewChat.scrollHeight;
+
+                setTimeout(() => {
+                    const replyId = 'reply-' + Date.now();
+                    overviewChat.insertAdjacentHTML('beforeend', `
+                        <div class="flex items-start space-x-2">
+                            <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                <i class="fa fa-robot text-primary text-xs"></i>
+                            </div>
+                            <div class="bg-primary/10 rounded-lg p-3 max-w-[85%] text-sm">
+                                <p id="${replyId}"></p>
+                            </div>
+                        </div>`);
+                    
+                    const replyEl = document.getElementById(replyId);
+                    const answerText = "收到您的简易查询。如需深度逻辑推演，请点击顶部导航栏进入【AI智能交互】页面体验完整模型。";
+                    let i = 0;
+                    function typeWriterOverview() {
+                        if (i < answerText.length) {
+                            replyEl.innerHTML += answerText.charAt(i);
+                            i++;
+                            overviewChat.scrollTop = overviewChat.scrollHeight;
+                            setTimeout(typeWriterOverview, 30);
+                        } else {
+                            overviewInput.disabled = false;
+                            overviewBtn.disabled = false;
+                            overviewInput.focus();
+                        }
+                    }
+                    typeWriterOverview();
+                }, 400);
+            }
+            overviewBtn.addEventListener('click', overviewSendMessage);
+            overviewInput.addEventListener('keypress', (e) => e.key === 'Enter' && overviewSendMessage());
+
+
+            // ==================== 4. 深度 AI 聊天 (DeepSeek 风格实时打字) ====================
+            const deepChat = document.getElementById('deep-chat-messages');
+            const deepInput = document.getElementById('deep-user-input');
+            const deepBtn = document.getElementById('deep-send-btn');
+            
+            const deepQADatabase = {
+                "水轮机效率": {
+                    think: "1. 接收查询指令：分析水轮机当前效能指标。\n2. 调取底层数据库，获取传感器数据流 (Node ID: W-Turbine-01)。\n3. 计算最新窗口期数据均值，水头高度正常，流量稳定，得出效率为92.3%。\n4. 对比历史最优模型阈值，判断处于高效区。\n5. 综合生成最终建议。",
+                    answer: "经深度分析，当前水轮机运行效率为 **92.3%**，位于系统最佳运行区间。\n\n**技术解读：**\n导叶开度与水流攻角匹配度极高，能量转换损失降至最低。建议维持当前负荷工况，非必要情况暂缓调整励磁电流以保证电网并网稳定性。"
+                },
+                "default": {
+                    think: "1. 识别用户输入内容。未能精准匹配数据库固有模型。\n2. 解析上下文语义特征，初步判断为通用技术验证。\n3. 准备执行结构化安全防御策略与引导式回复。\n4. 构建输出文本，提供标准范式。",
+                    answer: "非常抱歉，该问题超出当前工业参数的直接监控范畴。建议您尝试查询：\n\n- “分析水轮机效率”\n- “查询近期系统故障”\n- “当前车间负荷建议”"
+                }
+            };
+
+            function triggerDeepSeekResponse() {
+                const message = deepInput.value.trim();
+                if (!message) return;
+
+                deepInput.disabled = true; deepBtn.disabled = true;
+
+                deepChat.insertAdjacentHTML('beforeend', `
+                    <div class="flex items-start space-x-3 flex-row-reverse space-x-reverse">
+                        <div class="w-10 h-10 rounded-full bg-darker border border-blue-500/50 flex items-center justify-center shrink-0">
+                            <i class="fa fa-user text-blue-400"></i>
+                        </div>
+                        <div class="mt-2 text-gray-200 bg-blue-600/10 px-4 py-2 rounded-xl rounded-tr-sm">
+                            <p>${message}</p>
+                        </div>
+                    </div>`);
+                deepInput.value = '';
+                deepChat.scrollTop = deepChat.scrollHeight;
+
+                const answerId = 'ans-' + Date.now();
+                const thinkId = 'thk-' + Date.now();
+                const detailsId = 'det-' + Date.now();
+                
+                // 插入包含展开状态的 Details，并准备打字容器
+                deepChat.insertAdjacentHTML('beforeend', `
+                    <div class="flex items-start space-x-3">
+                        <div class="w-10 h-10 rounded-full bg-darker border border-primary/30 flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(0,212,255,0.2)]">
+                            <i class="fa fa-brain text-primary"></i>
+                        </div>
+                        <div class="mt-1 flex-1 max-w-[85%]">
+                            <details id="${detailsId}" class="mb-3 border border-gray-700/60 rounded-lg bg-darker/60 transition-all" open>
+                                <summary class="cursor-pointer text-sm text-gray-400 px-3 py-2 hover:text-gray-200 outline-none select-none flex items-center font-bold">
+                                    <i class="fa fa-circle-o-notch fa-spin text-primary mr-2" id="spin-${thinkId}"></i> 
+                                    <span id="title-${thinkId}">正在深度思考中...</span>
+                                </summary>
+                                <div class="px-4 text-gray-400 text-sm border-l-2 border-gray-600 ml-4 mt-1 mb-3 leading-relaxed" id="${thinkId}"></div>
+                            </details>
+                            <div id="${answerId}" class="text-gray-200 leading-relaxed font-sans mt-2"></div>
+                        </div>
+                    </div>`);
+                deepChat.scrollTop = deepChat.scrollHeight;
+
+                let data = deepQADatabase["default"];
+                for (const key in deepQADatabase) {
+                    if (message.includes(key)) { data = deepQADatabase[key]; break; }
+                }
+
+                const thinkEl = document.getElementById(thinkId);
+                const answerEl = document.getElementById(answerId);
+                const detailsEl = document.getElementById(detailsId);
+
+                let tIdx = 0;
+                function typeThink() {
+                    if (tIdx < data.think.length) {
+                        thinkEl.innerHTML += data.think.charAt(tIdx) === '\n' ? '<br>' : data.think.charAt(tIdx);
+                        tIdx++;
+                        deepChat.scrollTop = deepChat.scrollHeight;
+                        setTimeout(typeThink, 20); // 实时打字速度
+                    } else {
+                        // 思考完毕，打字完成：修改标题样式并自动折叠
+                        document.getElementById(`spin-${thinkId}`).className = "fa fa-check text-green-500 mr-2";
+                        document.getElementById(`title-${thinkId}`).innerText = "思考过程";
+                        detailsEl.removeAttribute('open'); // 自动收起折叠面板
+
+                        // 开始打出正式回答
+                        let aIdx = 0;
+                        function typeAnswer() {
+                            if (aIdx < data.answer.length) {
+                                answerEl.innerHTML += data.answer.charAt(aIdx) === '\n' ? '<br>' : data.answer.charAt(aIdx);
+                                aIdx++;
+                                deepChat.scrollTop = deepChat.scrollHeight;
+                                setTimeout(typeAnswer, 25);
+                            } else {
+                                deepInput.disabled = false; deepBtn.disabled = false; deepInput.focus();
+                            }
+                        }
+                        setTimeout(typeAnswer, 300);
+                    }
+                }
+                setTimeout(typeThink, 200);
+            }
+
+            deepBtn.addEventListener('click', triggerDeepSeekResponse);
+            deepInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!deepInput.disabled) triggerDeepSeekResponse();
+                }
+            });
+
+            // ==================== 5. ECharts 初始化 ====================
+            let plcChart, compareChart;
+            function initCharts() {
+                plcChart = echarts.init(document.getElementById('chart-plc'));
+                const plcOption = {
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'axis' },
+                    grid: { left: '5%', right: '5%', bottom: '5%', top: '10%', containLabel: true },
+                    xAxis: {
+                        type: 'category', boundaryGap: false,
+                        data: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
+                        axisLine: { lineStyle: { color: '#334155' } },
+                        axisLabel: { color: '#94a3b8', fontSize: 10 }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: { lineStyle: { color: '#334155' } },
+                        axisLabel: { color: '#94a3b8', fontSize: 10 },
+                        splitLine: { lineStyle: { color: '#1e293b' } }
+                    },
+                    series: [{
+                        name: '运行频率', type: 'line', smooth: true,
+                        data: [49.8, 50.1, 49.9, 50.2, 49.7, 50.0, 49.9],
+                        lineStyle: { color: '#00d4ff', width: 2 },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(0, 212, 255, 0.3)' },
+                                { offset: 1, color: 'rgba(0, 212, 255, 0)' }
+                            ])
+                        }
+                    }]
+                };
+
+                compareChart = echarts.init(document.getElementById('chart-compare'));
+                const compareOption = {
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                    grid: { left: '5%', right: '5%', bottom: '5%', top: '10%', containLabel: true },
+                    xAxis: {
+                        type: 'category', data: ['理论', '实际', '优化'],
+                        axisLine: { lineStyle: { color: '#334155' } },
+                        axisLabel: { color: '#94a3b8', fontSize: 10 }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: { lineStyle: { color: '#334155' } },
+                        axisLabel: { color: '#94a3b8', fontSize: 10 },
+                        splitLine: { lineStyle: { color: '#1e293b' } }
+                    },
+                    series: [{
+                        name: '效率', type: 'bar', barWidth: '40%', data: [88, 92.3, 95.6],
+                        itemStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: '#00d4ff' },
+                                { offset: 1, color: '#0099cc' }
+                            ]),
+                            borderRadius: [4, 4, 0, 0]
+                        }
+                    }]
+                };
+
+                plcChart.setOption(plcOption);
+                compareChart.setOption(compareOption);
+            }
+
+            setTimeout(initCharts, 100);
+
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    if (plcChart) plcChart.resize();
+                    if (compareChart) compareChart.resize();
+                    // 3D 画布尺寸自适应
+                    if(camera && renderer) {
+                        const container = document.getElementById('model-container');
+                        camera.aspect = container.clientWidth / container.clientHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(container.clientWidth, container.clientHeight);
+                    }
+                }, 100);
+            });
+
+            // ==================== 6. Three.js 加载 STL 模型 ====================
+            let camera, scene, renderer, controls;
+            function init3DModel() {
+                const container = document.getElementById('model-container');
+                const placeholder = document.getElementById('model-placeholder');
+                
+                // 避免重复初始化
+                if(container.querySelector('canvas')) return;
+
+                scene = new THREE.Scene();
+                
+                camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+                camera.position.set(0, 0, 150);
+
+                renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                container.appendChild(renderer.domElement);
+
+                // 鼠标交互控制 (允许旋转)
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true; 
+                controls.dampingFactor = 0.05;
+                controls.autoRotate = true; 
+                controls.autoRotateSpeed = 2.0;
+                
+                // 添加环境光与平行光照亮模型
+                const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+                scene.add(ambientLight);
+                
+                const dirLight = new THREE.DirectionalLight(0x00d4ff, 1);
+                dirLight.position.set(100, 200, 100);
+                scene.add(dirLight);
+
+                // 使用 STLLoader 加载外部模型
+                const loader = new THREE.STLLoader();
+                loader.load('blade.stl', function (geometry) {
+                    if(placeholder) placeholder.style.display = 'none';
+
+                    // 蓝色发光金属材质
+                    const material = new THREE.MeshStandardMaterial({ 
+                        color: 0x0099cc, 
+                        metalness: 0.8, 
+                        roughness: 0.2 
+                    });
+                    
+                    const mesh = new THREE.Mesh(geometry, material);
+                    
+                    // 自动居中和自适应缩放处理
+                    geometry.computeBoundingBox();
+                    const box = geometry.boundingBox;
+                    const center = new THREE.Vector3();
+                    box.getCenter(center);
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const scale = 80 / maxDim; // 缩放至画布适合尺寸
+                    mesh.scale.set(scale, scale, scale);
+                    mesh.position.sub(center.multiplyScalar(scale));
+                    
+                    scene.add(mesh);
+                }, undefined, function (error) {
+                    console.error('模型加载失败，请确保 blade.stl 与本网页在同一目录。', error);
+                    if(placeholder) {
+                        placeholder.innerHTML = `
+                            <i class="fa fa-exclamation-triangle text-4xl text-yellow-500 mb-2"></i>
+                            <p class="text-sm text-yellow-400">无法加载本地 blade.stl</p>
+                            <p class="text-[10px] text-gray-500 mt-1">请确保已放置于同目录且在本地服务器环境(如Live Server)下运行</p>
+                        `;
+                        placeholder.classList.remove('animate-pulse');
+                    }
+                });
+
+                function animate() {
+                    requestAnimationFrame(animate);
+                    controls.update();
+                    renderer.render(scene, camera);
+                }
+                animate();
+            }
+        });
+    </script>
+</body>
+</html>
